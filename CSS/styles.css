@@ -1,0 +1,23 @@
+body {
+    padding-top: 86px;
+    padding-bottom: 30px;
+    background-color: #5B7C99;
+    color: #F5F0E6;
+  }
+
+#btn-nuevaProforma{
+    padding-top: 30px;
+}
+
+.btn-primary, .btn-primary:active, .btn-primary:visited {
+    background-color: #7A9D7E;
+    border-color: #7A9D7E;
+    color: #F5F0E6;
+}
+
+.btn-primary:hover {
+    background-color: #E6B85C;
+    border-color: #E6B85C;
+    color: #F5F0E6;
+}
+
