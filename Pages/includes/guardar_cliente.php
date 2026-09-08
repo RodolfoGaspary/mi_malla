@@ -1,101 +1,88 @@
-<script>
-$(document).ready(function() {
-    // Handle "Guardar Informacion de Cliente" button click
-    $('#guardarCliente').on('click', function() {
-        // Collect form data
-        var clientData = {
-            nombresProforma: $('#nombresProforma').val(),
-            apellidosProforma: $('#apellidosProforma').val(),
-            celularProforma: $('#celularProforma').val(),
-            emailProforma: $('#emailProforma').val(),
-            direccionProforma: $('#direccionProforma').val(),
-            infoProforma: $('#infoProforma').val()
-        };
-
-        // Validate fields
-        if (
-            !clientData.nombresProforma ||
-            !clientData.apellidosProforma ||
-            !clientData.celularProforma ||
-            !clientData.emailProforma ||
-            !clientData.direccionProforma
-        ) {
-            console.log('Por favor, complete todos los campos requeridos.'); // Changed to console.log
-            return; // Stop the function if any required field is empty
-        }
-
-        // Send data via AJAX
-        $.ajax({
-            url: 'includes/a.php', // Path to the PHP function
-            type: 'POST',
-            data: clientData,
-            success: function(response) {
-                return;
-            },
-            error: function(xhr, status, error) {
-                return;
-            }
-        });
-    });
-});
-</script>
 <?php
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $name = $_POST['nombresProforma'];
-    $lastname = $_POST['apellidosProforma'];
-    $phone = $_POST['celularProforma'];
-    $email = $_POST['emailProforma'];
-    $address = $_POST['direccionProforma'];
-    $info = $_POST['infoProforma'];
+// Alta o actualización de cliente. Endpoint AJAX — requiere sesión y CSRF.
+require_once __DIR__ . '/sesion.php';
+require_once __DIR__ . '/csrf.php';
+require_once __DIR__ . '/db.php';
 
-    try {
-        // Database connection
-        include '../../Queries/db_connect.php';
+header('Content-Type: application/json; charset=utf-8');
 
-        // Check if a user with the same name and lastname or phone already exists
-        $sqlCheck = "SELECT id FROM clientes WHERE (nombres = :name AND apellidos = :lastname) OR telf = :phone";
-        $stmtCheck = $pdo->prepare($sqlCheck);
-        $stmtCheck->execute([
-            'name' => $name,
-            'lastname' => $lastname,
-            'phone' => $phone
-        ]);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'Método no permitido']);
+    exit();
+}
 
-        if ($stmtCheck->rowCount() > 0) {
-            // User exists, update the record
-            $row = $stmtCheck->fetch(PDO::FETCH_ASSOC);
-            $userId = $row['id'];
+csrf_verify();
 
-            $sqlUpdate = "UPDATE clientes SET nombres = :name, apellidos = :lastname, telf = :phone, email = :email, direccion = :address, info = :info WHERE id = :id";
-            $stmtUpdate = $pdo->prepare($sqlUpdate);
-            $stmtUpdate->execute([
-                'name' => $name,
-                'lastname' => $lastname,
-                'phone' => $phone,
-                'email' => $email,
-                'address' => $address,
-                'info' => $info,
-                'id' => $userId
-            ]);
+$campos = [
+    'nombres'   => trim($_POST['nombresProforma']   ?? ''),
+    'apellidos' => trim($_POST['apellidosProforma'] ?? ''),
+    'telf'      => trim($_POST['celularProforma']   ?? ''),
+    'email'     => trim($_POST['emailProforma']     ?? ''),
+    'direccion' => trim($_POST['direccionProforma'] ?? ''),
+    'info'      => trim($_POST['infoProforma']      ?? ''),
+];
 
-            echo "Cliente actualizado correctamente.";
-        } else {
-            // User does not exist, insert a new record
-            $sqlInsert = "INSERT INTO clientes (nombres, apellidos, telf, email, direccion, info) VALUES (:name, :lastname, :phone, :email, :address, :info)";
-            $stmtInsert = $pdo->prepare($sqlInsert);
-            $stmtInsert->execute([
-                'name' => $name,
-                'lastname' => $lastname,
-                'phone' => $phone,
-                'email' => $email,
-                'address' => $address,
-                'info' => $info
-            ]);
-
-            echo "Cliente registrado correctamente.";
-        }
-    } catch (PDOException $e) {
-        echo "Error: " . htmlspecialchars($e->getMessage());
+$faltantes = [];
+foreach (['nombres', 'apellidos', 'telf', 'email', 'direccion'] as $obligatorio) {
+    if ($campos[$obligatorio] === '') {
+        $faltantes[] = $obligatorio;
     }
 }
-?>
+
+if ($faltantes) {
+    http_response_code(422);
+    echo json_encode(['error' => 'Faltan campos obligatorios', 'campos' => $faltantes]);
+    exit();
+}
+
+if (!filter_var($campos['email'], FILTER_VALIDATE_EMAIL)) {
+    http_response_code(422);
+    echo json_encode(['error' => 'Correo electrónico inválido', 'campos' => ['email']]);
+    exit();
+}
+
+try {
+    // Mismo criterio de identidad que la versión original:
+    // coincide por nombre completo o por teléfono.
+    $stmt = $pdo->prepare(
+        "SELECT id FROM clientes
+          WHERE (nombres = :nombres AND apellidos = :apellidos)
+             OR telf = :telf
+          LIMIT 1"
+    );
+    $stmt->execute([
+        'nombres'   => $campos['nombres'],
+        'apellidos' => $campos['apellidos'],
+        'telf'      => $campos['telf'],
+    ]);
+    $existente = $stmt->fetch();
+
+    if ($existente) {
+        $campos['id'] = (int) $existente['id'];
+        $pdo->prepare(
+            "UPDATE clientes
+                SET nombres = :nombres, apellidos = :apellidos, telf = :telf,
+                    email = :email, direccion = :direccion, info = :info
+              WHERE id = :id"
+        )->execute($campos);
+
+        echo json_encode(['ok' => true, 'id' => $campos['id'], 'accion' => 'actualizado']);
+        exit();
+    }
+
+    $pdo->prepare(
+        "INSERT INTO clientes (nombres, apellidos, telf, email, direccion, info)
+         VALUES (:nombres, :apellidos, :telf, :email, :direccion, :info)"
+    )->execute($campos);
+
+    echo json_encode([
+        'ok'     => true,
+        'id'     => (int) $pdo->lastInsertId(),
+        'accion' => 'registrado',
+    ]);
+} catch (PDOException $e) {
+    error_log('guardar_cliente: ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['error' => 'No se pudo guardar el cliente']);
+}

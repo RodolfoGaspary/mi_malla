@@ -1,10 +1,16 @@
 <?php
 
-function isAdmin() {
-    // Check if the user is logged in and their role is "admin"
-    if (isset($_SESSION['username']) && isset($_SESSION['role']) && $_SESSION['role'] === 'admin') {
-        return true; // User is an admin
-    }
-    return false; // User is not an admin
+function isAdmin(): bool
+{
+    return isset($_SESSION['username'], $_SESSION['role'])
+        && $_SESSION['role'] === 'admin';
 }
-?>
+
+/** Corta la ejecución si el usuario no es administrador. */
+function requireAdmin(): void
+{
+    if (!isAdmin()) {
+        header('Location: dashboard.php');
+        exit();
+    }
+}

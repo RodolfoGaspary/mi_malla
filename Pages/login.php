@@ -1,93 +1,88 @@
 <?php
-session_start();
-$message = ""; // Message to display after login attempt
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+require_once __DIR__ . '/includes/csrf.php';
 
-// Check if the user is already logged in
+$message = '';
+
 if (isset($_SESSION['username'])) {
-    // Redirect to the dashboard page
-    header("Location: dashboard.php");
+    header('Location: dashboard.php');
     exit();
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
+    csrf_verify();
+
+    $username = trim($_POST['username'] ?? '');
+    $password = (string) ($_POST['password'] ?? '');
+
+    try {
+        require_once __DIR__ . '/includes/db.php';
+
+        // Una sola consulta trae todo lo que la sesión necesita.
+        $stmt = $pdo->prepare(
+            "SELECT id, username, nombre, role, password_hash
+               FROM users
+              WHERE username = :username
+              LIMIT 1"
+        );
+        $stmt->execute(['username' => $username]);
+        $user = $stmt->fetch();
+
+        if ($user && password_verify($password, $user['password_hash'])) {
+            session_regenerate_id(true);
+
+            $_SESSION['id']       = (int) $user['id'];
+            $_SESSION['username'] = $user['username'];
+            $_SESSION['nombre']   = $user['nombre'] ?? $user['username'];
+            $_SESSION['role']     = $user['role'] ?? 'user';
+
+            // Token nuevo para la sesión recién creada.
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+
+            header('Location: dashboard.php');
+            exit();
+        }
+
+        // Mismo mensaje para usuario inexistente y clave incorrecta:
+        // no revela qué usuarios existen.
+        $message = '<div class="alert alert-danger">Usuario o contraseña incorrectos.</div>';
+    } catch (PDOException $e) {
+        error_log('login: ' . $e->getMessage());
+        $message = '<div class="alert alert-danger">No se pudo iniciar sesión. Inténtalo más tarde.</div>';
+    }
 }
 ?>
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-    <title>Login</title>
-    <?php include 'includes/bootstrap_meta.php';?>
+    <title>Iniciar sesión · Mi Malla</title>
+    <?php include 'includes/bootstrap_meta.php'; ?>
 </head>
 <body class="d-flex align-items-center justify-content-center" style="height: 100vh; background-color: #5B7C99;">
 <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-md-6 col-lg-4">
-                <div class="card shadow">
-                    <div class="card-body" style="background-color: #F5F0E6; border-radius: 10px;">
-                        <img src="..." class="rounded mx-auto d-block" alt="Mallas de seguridad" title="Mi Malla">
-                        <h2 class="text-center mb-4">Iniciar Sesion</h2>
-                        <?php echo $message; ?>
-                        <form method="POST" action="">
-                            <div class="mb-3">
-                                <input type="text" name="username" id="username" class="form-control" placeholder="Usuario" required>
-                            </div>
-                            <div class="mb-3">
-                                <input type="password" name="password" id="password" class="form-control" placeholder="Contraseña" required>
-                            </div>
-                            <button type="submit" class="btn btn-primary w-100" name="login">Login</button>
-                        </form>
-                        <?php
-                            if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['login'])) {
-                                $username = $_POST['username'];
-                                $password = $_POST['password'];
-
-                                try {
-                                    // Database connection
-                                    include'../Queries/db_connect.php';
-
-                                    // Fetch user's hashed password
-                                    $stmt = $pdo->prepare("SELECT password_hash FROM users WHERE username = ?");
-                                    $stmt->execute([$username]);
-                                    $user = $stmt->fetch();
-
-                                    if ($user && password_verify($password, $user['password_hash'])) {
-                                        // Login successful
-                                        // Fetch the user's role (assuming it's stored in your database)
-                                        $stmt = $pdo->prepare("SELECT role FROM users WHERE username = ?");
-                                        $stmt->execute([$username]);
-                                        $role = $stmt->fetchColumn();
-
-                                        // Fetch the user's nombre (assuming it's stored in your database)
-                                        $stmt = $pdo->prepare("SELECT nombre FROM users WHERE username = ?");
-                                        $stmt->execute([$username]);
-                                        $nombre = $stmt->fetchColumn();
-
-                                        // Fetch the user's id (assuming it's stored in your database)
-                                        $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ?");
-                                        $stmt->execute([$username]);
-                                        $id = $stmt->fetchColumn();
-
-                                        // Start session and store user information
-                                        session_start();
-                                        session_regenerate_id(true); // Secure the session
-                                        $_SESSION['username'] = $username;
-                                        $_SESSION['role'] = $role; // Store the user's role
-                                        $_SESSION['nombre'] = $nombre; // Store the user's name
-                                        $_SESSION['id'] = $id; // Store the user's id
-
-                                        // Redirect to the dashboard
-                                        session_regenerate_id(true);
-                                        header("Location: dashboard.php");
-                                        exit();
-                                    } else {
-                                        // Invalid credentials
-                                        $message = "<p style='color:red;'>Invalid username or password.</p>";
-                                    }
-                                } catch (PDOException $e) {
-                                    $message = "<p style='color:red;'>Error: " . htmlspecialchars($e->getMessage()) . "</p>";
-                                }
-                            }
-                        ?>
-                    </div>
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-4">
+            <div class="card shadow">
+                <div class="card-body" style="background-color: #F5F0E6; border-radius: 10px;">
+                    <h2 class="text-center mb-4">Iniciar Sesión</h2>
+                    <?= $message ?>
+                    <form method="POST" action="">
+                        <?= csrf_field() ?>
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Usuario</label>
+                            <input type="text" name="username" id="username" class="form-control" autocomplete="username" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Contraseña</label>
+                            <input type="password" name="password" id="password" class="form-control" autocomplete="current-password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100" name="login">Entrar</button>
+                    </form>
                 </div>
             </div>
         </div>
-    
-    <?php include 'includes/bootstrap_end.php';?>
+    </div>
+</div>
+<?php include 'includes/bootstrap_end.php'; ?>
